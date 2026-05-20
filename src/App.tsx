@@ -282,7 +282,7 @@ export default function App() {
       if (summaryShiftDate.getHours() < 7 || (summaryShiftDate.getHours() === 7 && summaryShiftDate.getMinutes() < 5)) {
         summaryShiftDate.setDate(summaryShiftDate.getDate() - 1);
       }
-      const shiftDateStr = summaryShiftDate.toLocaleDateString('pt-BR').replace(/\//g, '-');
+      const shiftDateStr = getLocalDateString(summaryShiftDate);
       const currentCacheId = `${room}-${overrideChildId || 'none'}-summary-${shiftDateStr}`;
       
       if (lastDismissedId !== currentCacheId) {
@@ -292,51 +292,92 @@ export default function App() {
         
         try {
           // Check if summary is already cached
-          const cachedDoc = await getDoc(doc(db, 'roomSummaries', currentCacheId));
-          if (cachedDoc.exists() && cachedDoc.data().content) {
-            setImportantInfoContent(cachedDoc.data().content);
-          } else {
-            const roomProfiles = profiles.filter(p => overrideChildId ? p.id === overrideChildId : p.room === room);
-            const childrenNames = roomProfiles.map(p => p.name);
-            
-            // Gather activities from the last 36 hours to ensure full context of the previous shift
-            const cutoffTime = new Date(nowForSummary.getTime() - 36 * 60 * 60 * 1000);
-            
-            const roomActivities = activities.filter(a => childrenNames.includes(a.childName) && new Date(a.timestamp) >= cutoffTime).map(a => ({
-              childName: a.childName,
-              timestamp: new Date(a.timestamp),
-              description: a.description
-            }));
-            
-            const roomTemporaryMedications = roomProfiles
-              .filter(p => Array.isArray(p.temporaryMedications) && p.temporaryMedications.length > 0)
-              .map(p => ({
-                childName: p.name,
-                medications: p.temporaryMedications!
-              }));
-
-            const recentLegacyReports = legacyReports
-              .filter(lr => lr.aiAnalysis)
-              .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-              .slice(0, 3)
-              .map(lr => `Data: ${new Date(lr.date).toLocaleDateString('pt-BR')}\nAnálise:\n${lr.aiAnalysis}`);
-
-            const summary = await generateRoomSummary(room, lastReport, roomActivities, childrenNames, roomTemporaryMedications, recentLegacyReports);
-            setImportantInfoContent(summary);
-            
-            // Save to cache
-            try {
-              await setDoc(doc(db, 'roomSummaries', currentCacheId), {
-                content: summary,
-                createdAt: serverTimestamp()
-              });
-            } catch (e) {
-              console.error("Firestore error saving summary:", e);
+          const cachedDocRef = doc(db, 'roomSummaries', currentCacheId);
+          const cachedDoc = await getDoc(cachedDocRef);
+          
+          let isAnotherGenerating = false;
+          if (cachedDoc.exists()) {
+            const data = cachedDoc.data();
+            if (data.content) {
+              setImportantInfoContent(data.content);
+              setIsGeneratingSummary(false);
+              return; // We are done!
+            } else if (data.status === 'generating') {
+              const createdAt = data.createdAt ? (typeof data.createdAt.toMillis === 'function' ? data.createdAt.toMillis() : Date.now()) : Date.now();
+              // If it started generating less than 45 seconds ago, we wait for it
+              if (Date.now() - createdAt < 45000) {
+                isAnotherGenerating = true;
+              }
             }
           }
-        } catch (error) {
+          
+          if (isAnotherGenerating) {
+            setImportantInfoContent("Aguardando IA processar o resumo (outro assistente iniciou a tarefa)...");
+            const unsub = onSnapshot(cachedDocRef, (snap) => {
+              if (snap.exists() && snap.data().content) {
+                setImportantInfoContent(snap.data().content);
+                setIsGeneratingSummary(false);
+                unsub();
+              }
+            });
+            setTimeout(() => { unsub(); setIsGeneratingSummary(false); }, 20000); // 20s timeout
+            return;
+          }
+
+          // We claim the generation
+          await setDoc(cachedDocRef, {
+            status: 'generating',
+            createdAt: serverTimestamp()
+          });
+
+          const roomProfiles = profiles.filter(p => overrideChildId ? p.id === overrideChildId : p.room === room);
+          const childrenNames = roomProfiles.map(p => p.name);
+          
+          // Gather activities from the last 36 hours to ensure full context of the previous shift
+          const cutoffTime = new Date(nowForSummary.getTime() - 36 * 60 * 60 * 1000);
+          
+          const roomActivities = activities.filter(a => childrenNames.includes(a.childName) && new Date(a.timestamp) >= cutoffTime).map(a => ({
+            childName: a.childName,
+            timestamp: new Date(a.timestamp),
+            description: a.description
+          }));
+          
+          const roomTemporaryMedications = roomProfiles
+            .filter(p => Array.isArray(p.temporaryMedications) && p.temporaryMedications.length > 0)
+            .map(p => ({
+              childName: p.name,
+              medications: p.temporaryMedications!
+            }));
+
+          const recentLegacyReports = legacyReports
+            .filter(lr => lr.aiAnalysis)
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            .slice(0, 3)
+            .map(lr => `Data: ${new Date(lr.date).toLocaleDateString('pt-BR')}\nAnálise:\n${lr.aiAnalysis}`);
+
+          const summary = await generateRoomSummary(room, lastReport, roomActivities, childrenNames, roomTemporaryMedications, recentLegacyReports);
+          setImportantInfoContent(summary);
+          
+          // Save to cache
+          try {
+            await setDoc(cachedDocRef, {
+              content: summary,
+              status: 'ready',
+              createdAt: serverTimestamp()
+            });
+          } catch (e) {
+            console.error("Firestore error saving summary:", e);
+          }
+        } catch (error: any) {
           console.error("Erro ao gerar resumo da enfermaria:", error);
-          setImportantInfoContent("Não foi possível gerar um resumo usando Inteligência Artificial no momento. Por favor, cheque os relatórios do plantão anterior manualmente.");
+          if (error.message?.includes('HTML') || error.message?.includes('Fail to fetch') || window.location.hostname.includes('netlify.app')) {
+            setImportantInfoContent("Erro de Servidor: O aplicativo está hospedado no Netlify, que hospeda apenas a interface gráfica. Como a IA exige um servidor (backend) para guardar as senhas com segurança, gerar os resumos e analisar textos não funcionará aqui no Netlify. Por favor, acesse o link de Preview do AI Studio, ou hospede a versão full-stack em outro serviço (ex: Render, GCP, Firebase Functions).");
+          } else {
+            setImportantInfoContent("Não foi possível gerar um resumo usando Inteligência Artificial no momento. Por favor, cheque os relatórios do plantão anterior manualmente.");
+          }
+          // Remove the lock so someone else can try later
+          const cachedDocRef = doc(db, 'roomSummaries', currentCacheId);
+          setDoc(cachedDocRef, { status: 'error' }).catch(() => {});
         } finally {
           setIsGeneratingSummary(false);
         }

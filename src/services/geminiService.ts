@@ -58,7 +58,11 @@ export async function generateRoomSummary(room: string,
   if (!response.ok) {
     throw new Error('Falha na API (' + response.status + '): ' + await response.text());
   }
-  return await response.text();
+  const textContent = await response.text();
+  if (textContent.includes("<!DOCTYPE html>") || textContent.includes("<html")) {
+      throw new Error("HTML recebido. O app parece estar rodando em front-end estático sem servidor backend (como no Netlify).");
+  }
+  return textContent;
 }
 
 export async function extractMedicalReportData(images: { base64: string; mimeType: string }[]): Promise<MedicalReportExtraction> {

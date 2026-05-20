@@ -152,22 +152,26 @@ Importante: ${lastReport.importantInfo || 'Nada'}` : 'Sem informações do plant
         ? `\nRelatórios de Plantão (Legacy) Feitos Recentes:\n${legacyReportsInfo.join('\n\n')}` 
         : '';
 
-      const prompt = `Você é um assistente de IA para uma instituição de carinho infantil. Gere um resumo geral da enfermaria '${room}' para preparar a equipe para o plantão atual.
+      const prompt = `Você é um assistente do Instituto do Carinho. Gere um resumo **SUPER RÁPIDO E DIRETO** da enfermaria '${room}' para a equipe.
 Aqui estão as informações:
 
-Crianças nesta enfermaria: ${childrenNames.join(', ')}
+Crianças: ${childrenNames.join(', ')}
 
 ${reportContent}
 ${legacyContent}
 
-Atividades registradas hoje (nas últimas 24 horas):
-${activitiesContent || 'Nenhuma atividade registrada hoje ainda.'}
+Atividades (últimas 24h):
+${activitiesContent || 'Nenhuma.'}
 
-Medicações Temporárias Ativas:
-${medsContent || 'Nenhuma medicação temporária ativa.'}
+Medicações Temp. Ativas:
+${medsContent || 'Nenhuma.'}
 
-Gere um resumo em português, claro, profissional e empático, destacando os pontos principais (alertas graves, evolução de medicações de SOS se houver, pontos de atenção, e medicações temporárias que necessitam atenção/vigilância ou que terminam em breve). 
-Não invente informações e escreva de forma em um formato bem fácil e rápido de ler. Use markdown com negrito para destacar nomes/termos importantes, e use listas de marcadores para facilitar a leitura. Máximo de 3 tópicos gerais. Não precisa de cumprimento inicial.`;
+INSTRUÇÕES:
+- Formato leitura rápida (máximo 10 a 15 segundos).
+- Ignore informações normais/tranquilas.
+- FOQUE APENAS em 3 coisas: Alertas graves, sintomas/SOS, medicações temporárias vencendo.
+- Escreva em tópicos curtos (bullet points).
+- Sem nenhuma introdução (ex: "Aqui está o resumo"), apenas entregue os tópicos. Use markdown pra ser limpo.`;
 
       const response = await getAI().models.generateContent({
         model: "gemini-flash-latest",
