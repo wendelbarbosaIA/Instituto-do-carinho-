@@ -132,15 +132,7 @@ service cloud.firestore {
     }
     // Collection: roomSummaries
     match /roomSummaries/{summaryId} {
-      function isValidRoomSummary(data) {
-        return data.keys().hasAll(['content', 'createdAt']) &&
-               data.content is string &&
-               data.createdAt is timestamp;
-      }
-
-      allow get, list: if isSignedIn();
-      allow create, update: if isSignedIn() && isValidRoomSummary(incoming());
-      allow delete: if isSignedIn();
+      allow read, write: if isSignedIn();
     }
   }
 }
