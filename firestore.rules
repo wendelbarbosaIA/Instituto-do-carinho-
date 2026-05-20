@@ -1,0 +1,146 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper Functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Collection: system_config
+    match /system_config/{configId} {
+      function isValidSystemConfig(data) {
+        return data.keys().hasAll(['enabled']) &&
+               data.enabled is bool &&
+               (!('updatedAt' in data) || data.updatedAt is timestamp) &&
+               (!('updatedBy' in data) || data.updatedBy is string && data.updatedBy.size() <= 200);
+      }
+
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidSystemConfig(incoming());
+      allow update: if isSignedIn() && isValidSystemConfig(incoming());
+    }
+
+    // Collection: profiles
+    match /profiles/{profileId} {
+      function isValidProfile(data) {
+        return data.keys().hasAll(['name', 'authorUid', 'createdAt']) &&
+               data.name is string && data.name.size() <= 200 &&
+               data.authorUid is string &&
+               data.createdAt is timestamp;
+      }
+
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidProfile(incoming()) && incoming().authorUid == request.auth.uid;
+      allow update: if isSignedIn() && isValidProfile(incoming()) && incoming().authorUid == existing().authorUid;
+      allow delete: if isSignedIn();
+    }
+
+    // Collection: shiftReports
+    match /shiftReports/{reportId} {
+      function isValidShiftReport(data) {
+        return data.keys().hasAll(['date', 'room', 'authorUid', 'createdAt']) &&
+               data.date is string && data.room is string &&
+               data.authorUid is string &&
+               data.createdAt is timestamp;
+      }
+
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidShiftReport(incoming()) && incoming().authorUid == request.auth.uid;
+      allow update: if isSignedIn() && isValidShiftReport(incoming()) && incoming().authorUid == existing().authorUid;
+      allow delete: if isSignedIn();
+    }
+
+    // Collection: activities
+    match /activities/{activityId} {
+      function isValidActivity(data) {
+        return data.keys().hasAll(['childName', 'type', 'description', 'timestamp', 'status', 'authorUid']) &&
+               data.childName is string && data.type is string &&
+               data.description is string && data.timestamp is string &&
+               data.status is string && data.authorUid is string;
+      }
+
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidActivity(incoming()) && incoming().authorUid == request.auth.uid;
+      allow update: if isSignedIn() && isValidActivity(incoming()) && incoming().authorUid == existing().authorUid;
+      allow delete: if isSignedIn();
+    }
+
+    // Collection: notifications
+    match /notifications/{notifId} {
+      function isValidNotification(data) {
+        return data.keys().hasAll(['title', 'date', 'type', 'isRead', 'authorUid', 'createdAt']) &&
+               data.title is string && data.date is string &&
+               data.type is string && data.isRead is bool &&
+               data.authorUid is string &&
+               data.createdAt is timestamp;
+      }
+
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidNotification(incoming()) && incoming().authorUid == request.auth.uid;
+      allow update: if isSignedIn() && isValidNotification(incoming());
+      allow delete: if isSignedIn();
+    }
+
+    // Collection: vitalSigns
+    match /vitalSigns/{signId} {
+      function isValidVitalSign(data) {
+        return data.keys().hasAll(['childId', 'childName', 'timestamp', 'authorUid']) &&
+               data.childId is string && data.childName is string &&
+               data.timestamp is string && data.authorUid is string;
+      }
+
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidVitalSign(incoming()) && incoming().authorUid == request.auth.uid;
+      allow update: if isSignedIn() && isValidVitalSign(incoming()) && incoming().authorUid == existing().authorUid;
+      allow delete: if isSignedIn();
+    }
+
+    // Collection: legacy_reports
+    match /legacy_reports/{reportId} {
+      function isValidLegacyReport(data) {
+        return data.keys().hasAll(['date', 'content', 'authorUid', 'createdAt']) &&
+               data.date is string &&
+               data.content is string &&
+               data.authorUid is string &&
+               data.createdAt is timestamp &&
+               (!('imageUrl' in data) || data.imageUrl is string) &&
+               (!('aiAnalysis' in data) || data.aiAnalysis is string);
+      }
+
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidLegacyReport(incoming()) && incoming().authorUid == request.auth.uid;
+      allow update, delete: if isSignedIn() && (existing().authorUid == request.auth.uid);
+    }
+    // Collection: roomSummaries
+    match /roomSummaries/{summaryId} {
+      function isValidRoomSummary(data) {
+        return data.keys().hasAll(['content', 'createdAt']) &&
+               data.content is string &&
+               data.createdAt is timestamp;
+      }
+
+      allow get, list: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidRoomSummary(incoming());
+      allow delete: if isSignedIn();
+    }
+  }
+}

@@ -1,0 +1,197 @@
+{
+  "entities": {
+    "SystemConfig": {
+      "title": "SystemConfig",
+      "description": "Schema for system configuration documents.",
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["enabled"]
+    },
+    "ChildProfile": {
+      "title": "ChildProfile",
+      "description": "Profile information for a child in the institution.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Name of the child" },
+        "birthDate": { "type": "string", "description": "Birth date of the child" },
+        "supportDevices": { "type": "array", "items": { "type": "string" }, "description": "List of support devices" },
+        "liquidDiet": { "type": "string", "description": "Liquid diet details" },
+        "solidDiet": { "type": "string", "description": "Solid diet details" },
+        "medicationSchedule": { "type": "string", "description": "Medication schedule" },
+        "sosMedications": { "type": "string", "description": "SOS medications" },
+        "temporaryMedications": { 
+          "type": "array", 
+          "items": { "$ref": "#/entities/TemporaryMedication" },
+          "description": "List of temporary medications with expiry" 
+        },
+        "currentMedications": { "type": "array", "items": { "type": "string" }, "description": "List of current medications" },
+        "extracurriculars": { "type": "array", "items": { "type": "string" }, "description": "List of extracurricular activities" },
+        "preferences": { "type": "string", "description": "Child's preferences" },
+        "photoUrl": { "type": "string", "description": "URL to the child's photo" },
+        "authorUid": { "type": "string", "description": "UID of the user who created the profile" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": ["name", "authorUid", "createdAt"]
+    },
+    "TemporaryMedication": {
+      "title": "TemporaryMedication",
+      "description": "A medication that is given for a limited period.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" },
+        "startDate": { "type": "string", "format": "date" },
+        "endDate": { "type": "string", "format": "date" },
+        "endTime": { "type": "string" }
+      },
+      "required": ["id", "description", "startDate", "endDate", "endTime"]
+    },
+    "ShiftReport": {
+      "title": "ShiftReport",
+      "description": "Report for a specific shift.",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "description": "Date of the shift" },
+        "room": { "type": "string", "description": "Room assigned" },
+        "house": { "type": "string", "description": "House assigned" },
+        "staff": { "type": "string", "description": "Staff members on duty" },
+        "childrenData": { 
+          "type": "array", 
+          "items": { "$ref": "#/entities/ChildShiftData" },
+          "description": "Data for children in this shift"
+        },
+        "authorUid": { "type": "string", "description": "UID of the user who created the report" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": ["date", "room", "authorUid", "createdAt"]
+    },
+    "ChildShiftData": {
+      "title": "ChildShiftData",
+      "description": "Shift data for a specific child.",
+      "type": "object",
+      "properties": {
+        "childId": { "type": "string", "description": "ID of the child" },
+        "childName": { "type": "string", "description": "Name of the child" },
+        "generalState": { "type": "string", "description": "General state of the child" },
+        "spo2": { "type": "string", "description": "SpO2 level" },
+        "fc": { "type": "string", "description": "Heart rate" },
+        "tax": { "type": "string", "description": "Temperature" },
+        "diuresis": { "type": "string", "description": "Diuresis status" },
+        "evacuation": { "type": "string", "description": "Evacuation status" },
+        "feeding": { "type": "string", "description": "Feeding status" },
+        "water": { "type": "string", "description": "Water intake status" },
+        "obs": { "type": "string", "description": "Observations" }
+      },
+      "required": ["childId", "childName"]
+    },
+    "ChildActivity": {
+      "title": "ChildActivity",
+      "description": "An activity or event related to a child.",
+      "type": "object",
+      "properties": {
+        "childName": { "type": "string", "description": "Name of the child" },
+        "type": { "type": "string", "description": "Type of activity" },
+        "description": { "type": "string", "description": "Description of the activity" },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the activity occurred" },
+        "appointmentDate": { "type": "string", "description": "Date of appointment if applicable" },
+        "status": { "type": "string", "description": "Status of the activity" },
+        "authorUid": { "type": "string", "description": "UID of the user who created the activity" }
+      },
+      "required": ["childName", "type", "description", "timestamp", "status", "authorUid"]
+    },
+    "AppNotification": {
+      "title": "AppNotification",
+      "description": "A notification in the app.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Title of the notification" },
+        "description": { "type": "string", "description": "Description of the notification" },
+        "date": { "type": "string", "description": "Date of the notification" },
+        "time": { "type": "string", "description": "Time of the notification" },
+        "type": { "type": "string", "description": "Type of notification" },
+        "isRead": { "type": "boolean", "description": "Whether the notification has been read" },
+        "authorUid": { "type": "string", "description": "UID of the user who created the notification" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": ["title", "date", "type", "isRead", "authorUid", "createdAt"]
+    },
+    "VitalSignReading": {
+      "title": "VitalSignReading",
+      "description": "A reading of vital signs for a child.",
+      "type": "object",
+      "properties": {
+        "childId": { "type": "string", "description": "ID of the child" },
+        "childName": { "type": "string", "description": "Name of the child" },
+        "spo2": { "type": "string", "description": "SpO2 level" },
+        "heartRate": { "type": "string", "description": "Heart rate" },
+        "temperature": { "type": "string", "description": "Temperature" },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the reading was taken" },
+        "authorUid": { "type": "string", "description": "UID of the user who took the reading" },
+        "authorName": { "type": "string", "description": "Name of the user who took the reading" }
+      },
+      "required": ["childId", "childName", "timestamp", "authorUid"]
+    },
+    "LegacyReport": {
+      "title": "LegacyReport",
+      "description": "Historical report for AI analysis.",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "description": "Date of the report", "format": "date" },
+        "content": { "type": "string", "description": "Text content of the report" },
+        "imageUrl": { "type": "string", "description": "URL of the scanned report image" },
+        "aiAnalysis": { "type": "string", "description": "Structured analysis from AI" },
+        "authorUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["date", "content", "authorUid", "createdAt"]
+    },
+    "RoomSummary": {
+      "title": "RoomSummary",
+      "description": "Cached room summary generated by AI.",
+      "type": "object",
+      "properties": {
+        "content": { "type": "string", "description": "The generated summary content" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": ["content", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/roomSummaries": {
+      "schema": "RoomSummary",
+      "description": "Collection of cached AI room summaries."
+    },
+    "/profiles": {
+      "schema": "ChildProfile",
+      "description": "Collection of child profiles."
+    },
+    "/shiftReports": {
+      "schema": "ShiftReport",
+      "description": "Collection of shift reports."
+    },
+    "/activities": {
+      "schema": "ChildActivity",
+      "description": "Collection of child activities."
+    },
+    "/notifications": {
+      "schema": "AppNotification",
+      "description": "Collection of app notifications."
+    },
+    "/vitalSigns": {
+      "schema": "VitalSignReading",
+      "description": "Collection of vital sign readings."
+    },
+    "/legacy_reports": {
+      "schema": "LegacyReport",
+      "description": "Collection of historical reports for database enrichment."
+    },
+    "/system_config": {
+      "schema": "SystemConfig",
+      "description": "Global system configuration settings."
+    }
+  }
+}

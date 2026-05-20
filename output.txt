@@ -1,0 +1,22 @@
+301:                type: 'medication_checkout',
+491:    type: 'other',
+507:    type: 'medical_request' | 'medical_completed';
+513:    type: 'medical_request',
+689:        type: 'report',
+723:      type: medicalEventForm.type,
+777:          type: 'medical',
+793:      type: 'medical_request',
+812:      type: 'medical_request',
+1157:        type: 'medication',
+1225:          type: 'activity',
+1250:          type: 'report',
+1332:      type: 'medical_completed',
+1486:      type: 'medication',
+1526:    setNotificationForm({ title: '', description: '', date: '', time: '', type: 'other', imageUrl: '' });
+1558:          type: a.type
+1719:    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+2239:                            type: 'medical_request',
+2273:                              type: 'medical_request',
+2319:                            type: 'medical_completed',
+2349:                              type: 'medical_completed',
+4306:                    onChange={(e) => setNotificationForm({ ...notificationForm, type: e.target.value as any })}
