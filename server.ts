@@ -251,6 +251,82 @@ INSTRUÇÕES:
     }
   });
 
+  app.post("/api/gemini/analyzeLegacyReport", async (req, res) => {
+    try {
+      const { date, content, imageUrl, mimeType } = req.body;
+      const prompt = `Você é um assistente de enfermagem especializado em cuidados de crianças especiais. 
+      Analise este relatório de plantão (texto ou imagem) da enfermaria e extraia informações críticas de forma estruturada.
+      
+      FOQUE EM:
+      - Ocorrências principais no plantão
+      - Sinais vitais anormais ou alertas
+      - Medicamentos administrados (especiais ou SOS)
+      - Alimentação (GTT, SNE, Oral) e intercorrências
+      - Observações comportamentais relevantes das crianças
+      
+      Responda em Português do Brasil com um resumo técnico, estruturado e profissional. 
+      Agrupe as informações por criança (pelo nome), relatando os eventos de cada uma. Se for um evento geral da enfermaria, crie uma seção "Geral".
+      A data do relatório é: ${date}`;
+      
+      const parts: any[] = [{ text: prompt }];
+      if (content) parts.push({ text: `CONTEÚDO TEXTUAL DO RELATÓRIO:\n${content}` });
+      if (imageUrl) {
+        let base64 = imageUrl;
+        if (imageUrl.includes(",")) base64 = imageUrl.split(",")[1];
+        parts.push({
+          inlineData: {
+            data: base64,
+            mimeType: mimeType || 'image/jpeg'
+          }
+        });
+      }
+
+      const response = await getAI().models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: { parts }
+      });
+      res.json({ text: response.text });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/gemini/askAI", async (req, res) => {
+    try {
+      const { query, context } = req.body;
+      const prompt = `
+        Você é o Assistente Virtual do Instituto do Carinho.
+        Sua tarefa é responder perguntas dos funcionários usando os dados do banco de dados fornecidos abaixo.
+        
+        Sempre responda em Português do Brasil.
+        
+        DADOS DO BANCO DE DADOS:
+        ${JSON.stringify(context)}
+        
+        PERGUNTA DO USUÁRIO:
+        ${query}
+        
+        INSTRUÇÕES:
+        - Responda de forma clara, profissional e carinhosa.
+        - Se não encontrar a informação nos dados fornecidos, diga que não encontrou nos registros recentes.
+        - Mantenha o foco em informações sobre as crianças, medicamentos, atividades e relatórios.
+      `;
+
+      const response = await getAI().models.generateContent({
+        model: "gemini-3-flash-preview",
+        config: {
+          systemInstruction: "Você é um assistente especializado em gestão de plantão para um instituto de cuidados de crianças especiais. Seja empático, preciso e útil."
+        },
+        contents: prompt,
+      });
+      res.json({ text: response.text });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Vite Middleware
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

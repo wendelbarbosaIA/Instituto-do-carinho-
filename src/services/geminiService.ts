@@ -76,3 +76,29 @@ export async function extractMedicalReportData(images: { base64: string; mimeTyp
   }
   return await response.json();
 }
+
+export async function analyzeLegacyReport(data: { date: string; content: string; imageUrl?: string; mimeType?: string }): Promise<string> {
+  const response = await fetch('/api/gemini/analyzeLegacyReport', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  if (!response.ok) {
+    throw new Error('Falha na API (' + response.status + '): ' + await response.text());
+  }
+  const result = await response.json();
+  return result.text;
+}
+
+export async function askAI(data: { query: string; context: any }): Promise<string> {
+  const response = await fetch('/api/gemini/askAI', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  if (!response.ok) {
+    throw new Error('Falha na API (' + response.status + '): ' + await response.text());
+  }
+  const result = await response.json();
+  return result.text;
+}

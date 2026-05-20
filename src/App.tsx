@@ -5,7 +5,6 @@
 
 import { useState, useEffect, ChangeEvent, useMemo } from 'react';
 import { motion, AnimatePresence, useScroll, useTransform, useMotionValueEvent } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
 import { 
   ClipboardList, 
   Pill, 
@@ -47,7 +46,7 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { ChildActivity, ReportSummary, ChildProfile, AppNotification, ShiftReport, ChildShiftData, VitalSignReading, LegacyReport, TemporaryMedication } from './types';
-import { extractMedicalEventData, extractMedicalReportData, MedicalReportExtraction, extractAndCategorizeActivities, generateRoomSummary } from './services/geminiService';
+import { extractMedicalEventData, extractMedicalReportData, MedicalReportExtraction, extractAndCategorizeActivities, generateRoomSummary, analyzeLegacyReport as analyzeLegacyReportAPI, askAI as askAIAPI } from './services/geminiService';
 import { db, auth } from './firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, serverTimestamp, updateDoc, addDoc, getDoc } from 'firebase/firestore';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, browserPopupRedirectResolver } from 'firebase/auth';
@@ -2035,50 +2034,16 @@ export default function App() {
     setIsAnalyzingLegacyReport(true);
     setLegacyReportAnalysis(null);
     try {
-      if (!process.env.GEMINI_API_KEY) {
-        throw new Error("GEMINI_API_KEY não configurado.");
-      }
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-      const prompt = `Você é um assistente de enfermagem especializado em cuidados de crianças especiais. 
-      Analise este relatório de plantão (texto ou imagem) da enfermaria e extraia informações críticas de forma estruturada.
-      
-      FOQUE EM:
-      - Ocorrências principais no plantão
-      - Sinais vitais anormais ou alertas
-      - Medicamentos administrados (especiais ou SOS)
-      - Alimentação (GTT, SNE, Oral) e intercorrências
-      - Observações comportamentais relevantes das crianças
-      
-      Responda em Português do Brasil com um resumo técnico, estruturado e profissional. 
-      Agrupe as informações por criança (pelo nome), relatando os eventos de cada uma. Se for um evento geral da enfermaria, crie uma seção "Geral".
-      A data do relatório é: ${legacyReportForm.date}`;
-      
-      const parts: any[] = [{ text: prompt }];
-      
-      if (legacyReportForm.content) {
-        parts.push({ text: `CONTEÚDO TEXTUAL DO RELATÓRIO:\n${legacyReportForm.content}` });
-      }
-      
-      if (legacyReportForm.imageUrl) {
-        parts.push({ 
-          inlineData: { 
-            data: legacyReportForm.imageUrl, 
-            mimeType: legacyReportForm.mimeType || 'image/jpeg' 
-          } 
-        });
-      }
-
-      const response = await ai.models.generateContent({ 
-        model: "gemini-3-flash-preview",
-        contents: { parts }
+      const text = await analyzeLegacyReportAPI({
+        date: legacyReportForm.date,
+        content: legacyReportForm.content,
+        imageUrl: legacyReportForm.imageUrl || undefined,
+        mimeType: legacyReportForm.mimeType
       });
-      
-      const text = response.text || "";
       setLegacyReportAnalysis(text);
     } catch (error) {
       console.error("Erro na análise da IA:", error);
-      showToast("Houve um erro de permissão (403). Verifique se você configurou sua GEMINI_API_KEY corretamente na aba Settings > Secrets do AI Studio.");
+      showToast("Houve um erro ao se comunicar com a IA. Verifique se o servidor está rodando corretamente.");
     } finally {
       setIsAnalyzingLegacyReport(false);
     }
@@ -2737,37 +2702,10 @@ export default function App() {
         }))
       };
 
-      if (!process.env.GEMINI_API_KEY) {
-        throw new Error("GEMINI_API_KEY não configurado.");
-      }
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const prompt = `
-        Você é o Assistente Virtual do Instituto do Carinho.
-        Sua tarefa é responder perguntas dos funcionários usando os dados do banco de dados fornecidos abaixo.
-        
-        Sempre responda em Português do Brasil.
-        
-        DADOS DO BANCO DE DADOS:
-        ${JSON.stringify(context)}
-        
-        PERGUNTA DO USUÁRIO:
-        ${currentQuery}
-        
-        INSTRUÇÕES:
-        - Responda de forma clara, profissional e carinhosa.
-        - Se não encontrar a informação nos dados fornecidos, diga que não encontrou nos registros recentes.
-        - Mantenha o foco em informações sobre as crianças, medicamentos, atividades e relatórios.
-      `;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        config: {
-          systemInstruction: "Você é um assistente especializado em gestão de plantão para um instituto de cuidados de crianças especiais. Seja empático, preciso e útil."
-        },
-        contents: prompt,
+      const aiResponse = await askAIAPI({
+        query: currentQuery,
+        context: context
       });
-
-      const aiResponse = response.text || "Desculpe, não consegui processar sua pergunta.";
       setSearchMessages(prev => [...prev, { role: 'ai', content: aiResponse }]);
     } catch (error) {
       console.error("AI Search Error:", error);
@@ -4397,7 +4335,7 @@ END:VCALENDAR`;
                     }}
                     className="flex shrink-0 items-center gap-2 px-6 py-3 bg-emerald-500 text-white rounded-xl text-sm font-bold hover:bg-emerald-600 transition-all shadow-md shadow-emerald-200"
                   >
-                    <ClipboardList className="w-4 h-4" /> Copiar Relatório
+                    <ClipboardList className="w-4 h-4" /> Copiar relatório e enviar para whatsapp
                   </button>
                 </div>
 
@@ -4482,7 +4420,7 @@ END:VCALENDAR`;
                             }}
                             className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg text-xs font-bold hover:bg-emerald-100 transition-all"
                           >
-                            <ClipboardList className="w-3 h-3" /> Copiar para WhatsApp
+                            <ClipboardList className="w-3 h-3" /> Copiar relatório e enviar para whatsapp
                           </button>
                           {isShiftReportEditable(report) && (
                             <>
@@ -6656,7 +6594,7 @@ END:VCALENDAR`;
                   }}
                   className="flex-1 bg-emerald-500 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-200"
                 >
-                  <ClipboardList className="w-5 h-5" /> Copiar para WhatsApp
+                  <ClipboardList className="w-5 h-5" /> Copiar relatório e enviar para whatsapp
                 </button>
                 <button 
                   onClick={() => setSelectedReport(null)}
