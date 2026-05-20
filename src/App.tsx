@@ -50,7 +50,7 @@ import { ChildActivity, ReportSummary, ChildProfile, AppNotification, ShiftRepor
 import { extractMedicalEventData, extractMedicalReportData, MedicalReportExtraction, extractAndCategorizeActivities, generateRoomSummary } from './services/geminiService';
 import { db, auth } from './firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, serverTimestamp, updateDoc, addDoc, getDoc } from 'firebase/firestore';
-import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, browserPopupRedirectResolver } from 'firebase/auth';
 import Markdown from 'react-markdown';
 
 // Constants
@@ -233,7 +233,19 @@ export default function App() {
     else if (latest <= 30 && compact) setCompact(false);
   });
 
+  const [loginError, setLoginError] = useState<string | null>(null);
+  
   useEffect(() => {
+    // Check for redirect result in case of mobile login flow
+    getRedirectResult(auth).catch((error) => {
+      console.error("Redirect login error:", error);
+      if (error.message && error.message.includes('initial state')) {
+        setLoginError("Erro de particionamento de armazenamento (Cookies de terceiros bloqueados). Tente usar o Safari/Chrome normal, não o navegador de dentro do Instagram/Facebook, ou libere cookies de terceiros nas configurações.");
+      } else {
+        setLoginError(error.message);
+      }
+    });
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setIsAuthReady(true);
@@ -334,18 +346,29 @@ export default function App() {
 
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  const handleLogin = async () => {
+  const handleLogin = async (method: 'popup' | 'redirect') => {
     if (isLoggingIn) return;
     setIsLoggingIn(true);
+    setLoginError(null);
     const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({
+      prompt: 'select_account'
+    });
     try {
-      await signInWithPopup(auth, provider);
+      if (method === 'redirect') {
+        await signInWithRedirect(auth, provider);
+      } else {
+        await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+      }
     } catch (error: any) {
-      if (error.code !== 'auth/cancelled-popup-request') {
+      if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
         console.error("Error logging in:", error);
+        setLoginError(error.message + " (Tente liberar cookies de terceiros ou usar outro navegador se estiver no Safari/Instagram)");
       }
     } finally {
-      setIsLoggingIn(false);
+      if (method === 'popup') {
+        setIsLoggingIn(false);
+      }
     }
   };
 
@@ -3179,7 +3202,7 @@ END:VCALENDAR`;
               </div>
             ) : (
               <button 
-                onClick={handleLogin} 
+                onClick={() => handleLogin('popup')} 
                 disabled={isLoggingIn}
                 className="bg-sky-500 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-sky-600 transition-all disabled:opacity-50"
               >
@@ -7502,14 +7525,30 @@ END:VCALENDAR`;
               <h2 className="text-2xl font-bold text-slate-800 tracking-tighter">Bem-vindo ao Portal</h2>
               <p className="text-slate-500 text-sm">Faça login para acessar o sistema do Instituto do Carinho.</p>
             </div>
-            <button 
-              onClick={handleLogin}
-              disabled={isLoggingIn}
-              className="w-full py-4 bg-sky-500 text-white font-bold rounded-2xl shadow-lg shadow-sky-100 hover:bg-sky-600 transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50"
-            >
-              <Heart className="w-5 h-5 text-white fill-white" />
-              {isLoggingIn ? 'Conectando...' : 'Entrar com Google'}
-            </button>
+            
+            {loginError && (
+              <div className="p-4 bg-rose-50 text-rose-600 rounded-xl text-sm font-medium text-center">
+                {loginError}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <button 
+                onClick={() => handleLogin('popup')}
+                disabled={isLoggingIn}
+                className="w-full py-4 bg-sky-500 text-white font-bold rounded-2xl shadow-lg shadow-sky-100 hover:bg-sky-600 transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50"
+              >
+                <Heart className="w-5 h-5 text-white fill-white" />
+                {isLoggingIn ? 'Conectando...' : 'Entrar com Google'}
+              </button>
+              <button 
+                onClick={() => handleLogin('redirect')}
+                disabled={isLoggingIn}
+                className="w-full text-xs text-slate-500 font-medium hover:text-slate-800 transition-colors"
+              >
+                Usando celular / Instagram? Entrar via Redirecionamento
+              </button>
+            </div>
           </div>
         </div>
       )}
