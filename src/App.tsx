@@ -2865,11 +2865,18 @@ export default function App() {
     setCurrentShiftReport({ ...currentShiftReport, childrenData: newChildrenData });
   };
 
-  const copyToClipboard = (text: string, message?: string) => {
+  const copyToClipboard = (text: string, message?: string, openWhatsApp?: boolean) => {
     navigator.clipboard.writeText(text).then(() => {
       showToast(message || 'Relatório copiado para a área de transferência!');
+      if (openWhatsApp) {
+        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+      }
     }).catch(err => {
       console.error('Falha ao copiar:', err);
+      // Fallback: tenta abrir o WhatsApp mesmo se a cópia falhar
+      if (openWhatsApp) {
+        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+      }
     });
   };
 
@@ -4383,9 +4390,9 @@ END:VCALENDAR`;
                       }
 
                       if (success) {
-                        copyToClipboard(text, 'Relatório copiado e salvo no histórico!');
+                        copyToClipboard(text, 'Relatório copiado e salvo no histórico!', true);
                       } else {
-                        copyToClipboard(text, 'Relatório copiado, mas houve um erro ao salvá-lo.');
+                        copyToClipboard(text, 'Relatório copiado, mas houve um erro ao salvá-lo.', true);
                       }
                     }}
                     className="flex shrink-0 items-center gap-2 px-6 py-3 bg-emerald-500 text-white rounded-xl text-sm font-bold hover:bg-emerald-600 transition-all shadow-md shadow-emerald-200"
@@ -4471,7 +4478,7 @@ END:VCALENDAR`;
                           <button 
                             onClick={() => {
                               const text = formatShiftReportForWhatsApp(report);
-                              copyToClipboard(text);
+                              copyToClipboard(text, undefined, true);
                             }}
                             className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg text-xs font-bold hover:bg-emerald-100 transition-all"
                           >
@@ -6645,7 +6652,7 @@ END:VCALENDAR`;
                 <button 
                   onClick={() => {
                     const text = formatShiftReportForWhatsApp(selectedReport);
-                    copyToClipboard(text);
+                    copyToClipboard(text, undefined, true);
                   }}
                   className="flex-1 bg-emerald-500 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-200"
                 >
