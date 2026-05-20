@@ -190,6 +190,10 @@ export default function App() {
   const [enteredPassword, setEnteredPassword] = useState('');
   const [passwordError, setPasswordError] = useState(false);
   const [toast, setToast] = useState<{ message: string; show: boolean }>({ message: '', show: false });
+  const showToast = (message: string) => {
+    setToast({ message, show: true });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+  };
   const [medicationNotificationsEnabled, setMedicationNotificationsEnabled] = useState(false);
   const [isSyncingNotifications, setIsSyncingNotifications] = useState(true);
 
@@ -1207,7 +1211,7 @@ export default function App() {
 
   const handleSaveRawEvent = async () => {
     if (!inputText.trim() || !selectedChildForEvent) {
-      alert("Por favor, selecione uma criança e digite o evento.");
+      showToast("Por favor, selecione uma criança e digite o evento.");
       return;
     }
 
@@ -1277,10 +1281,10 @@ export default function App() {
 
       setInputText('');
       setSelectedChildForEvent('');
-      alert("Adicionado ao relatório com sucesso!");
+      showToast("Adicionado ao relatório com sucesso!");
     } catch (error) {
       console.error("Erro ao processar relato:", error);
-      alert("Houve um erro ao processar seu relato com IA. Tente novamente.");
+      showToast("Houve um erro ao processar seu relato com IA. Tente novamente.");
     } finally {
       setIsProcessing(false);
     }
@@ -1414,7 +1418,7 @@ export default function App() {
 
   const handleSaveProfile = async () => {
     if (!profileForm.name) {
-      alert('Por favor, preencha o nome da criança.');
+      showToast('Por favor, preencha o nome da criança.');
       return;
     }
 
@@ -1472,7 +1476,7 @@ export default function App() {
       });
     } catch (error) {
       console.error("Error saving profile:", error);
-      alert("Erro ao salvar o perfil. Tente novamente.");
+      showToast("Erro ao salvar o perfil. Tente novamente.");
     } finally {
       setIsProcessing(false);
     }
@@ -1935,7 +1939,7 @@ export default function App() {
       });
     } catch (error) {
       console.error("Error saving shift report:", error);
-      alert("Erro ao salvar o relatório. Tente novamente.");
+      showToast("Erro ao salvar o relatório. Tente novamente.");
     } finally {
       setIsProcessing(false);
     }
@@ -1994,7 +1998,7 @@ export default function App() {
       setPrescriptionMimeType(mimeType);
     } catch (error) {
       console.error("Erro ao processar imagem:", error);
-      alert("Erro ao processar a imagem. Tente novamente.");
+      showToast("Erro ao processar a imagem. Tente novamente.");
     } finally {
       setIsPrescriptionProcessing(false);
     }
@@ -2016,7 +2020,7 @@ export default function App() {
       }));
     } catch (error) {
       console.error("Erro ao processar imagem para relatório legado:", error);
-      alert("Erro ao processar a imagem.");
+      showToast("Erro ao processar a imagem.");
     } finally {
       setIsAnalyzingLegacyReport(false);
     }
@@ -2024,7 +2028,7 @@ export default function App() {
 
   const analyzeLegacyReport = async () => {
     if (!legacyReportForm.content && !legacyReportForm.imageUrl) {
-      alert("Por favor, adicione texto ou uma imagem para analisar.");
+      showToast("Por favor, adicione texto ou uma imagem para analisar.");
       return;
     }
 
@@ -2074,7 +2078,7 @@ export default function App() {
       setLegacyReportAnalysis(text);
     } catch (error) {
       console.error("Erro na análise da IA:", error);
-      alert("Houve um erro de permissão (403). Verifique se você configurou sua GEMINI_API_KEY corretamente na aba Settings > Secrets do AI Studio.");
+      showToast("Houve um erro de permissão (403). Verifique se você configurou sua GEMINI_API_KEY corretamente na aba Settings > Secrets do AI Studio.");
     } finally {
       setIsAnalyzingLegacyReport(false);
     }
@@ -2111,10 +2115,10 @@ export default function App() {
       setIsLegacyReportModalOpen(false);
       setLegacyReportForm({ date: new Date().toISOString().split('T')[0], content: '' });
       setLegacyReportAnalysis(null);
-      alert("Histórico legado importado e analisado com sucesso!");
+      showToast("Histórico legado importado e analisado com sucesso!");
     } catch (error) {
       console.error("Erro ao salvar relatório legado:", error);
-      alert("Erro ao salvar relatório no banco de dados.");
+      showToast("Erro ao salvar relatório no banco de dados.");
     } finally {
       setIsAnalyzingLegacyReport(false);
     }
@@ -2170,7 +2174,7 @@ export default function App() {
       setMatchedProfileId(null);
     } catch (error) {
       console.error("Erro ao salvar prescrição:", error);
-      alert("Erro ao salvar a prescrição. Verifique sua conexão e tente novamente.");
+      showToast("Erro ao salvar a prescrição. Verifique sua conexão e tente novamente.");
     } finally {
       setIsPrescriptionProcessing(false);
     }
@@ -2178,7 +2182,7 @@ export default function App() {
 
   const handleSaveVitalSigns = async () => {
     if (!vitalSignsForm.childId) {
-      alert('Selecione uma criança.');
+      showToast('Selecione uma criança.');
       return;
     }
 
@@ -2283,7 +2287,7 @@ export default function App() {
       });
     } catch (error) {
       console.error("Erro ao salvar sinais vitais:", error);
-      alert("Erro ao salvar os sinais vitais. Tente novamente.");
+      showToast("Erro ao salvar os sinais vitais. Tente novamente.");
     } finally {
       setIsProcessing(false);
     }
@@ -2323,7 +2327,7 @@ export default function App() {
       }
     } catch (error) {
       console.error("Erro ao processar relatório:", error);
-      alert("Erro ao processar as imagens. Tente novamente.");
+      showToast("Erro ao processar as imagens. Tente novamente.");
     } finally {
       setIsReportAIProcessing(false);
     }
@@ -2365,7 +2369,7 @@ export default function App() {
       setMatchedReportProfileId(null);
     } catch (error) {
       console.error("Erro ao confirmar relatório:", error);
-      alert("Erro ao salvar os dados. Tente novamente.");
+      showToast("Erro ao salvar os dados. Tente novamente.");
     } finally {
       setIsReportAIProcessing(false);
     }
@@ -2597,7 +2601,7 @@ export default function App() {
     const justification = medicationJustifications[notif.id];
 
     if (isLate && (!justification || justification.trim() === '')) {
-      alert("Por favor, preencha a justificativa para o atraso.");
+      showToast("Por favor, preencha a justificativa para o atraso.");
       return;
     }
 
@@ -2863,8 +2867,7 @@ export default function App() {
 
   const copyToClipboard = (text: string, message?: string) => {
     navigator.clipboard.writeText(text).then(() => {
-      setToast({ message: message || 'Relatório copiado para a área de transferência!', show: true });
-      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+      showToast(message || 'Relatório copiado para a área de transferência!');
     }).catch(err => {
       console.error('Falha ao copiar:', err);
     });
@@ -3097,7 +3100,7 @@ END:VCALENDAR`;
                     <button 
                       onClick={() => {
                         if (!internedChildId) {
-                           alert('Selecione uma criança primeiro.');
+                           showToast('Selecione uma criança primeiro.');
                            return;
                         }
                         handleSelectRoom('Internação Temporária', internedChildId);
