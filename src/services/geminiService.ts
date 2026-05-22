@@ -20,7 +20,12 @@ export async function extractMedicalEventData(text: string, profiles: { name: st
     body: JSON.stringify({ text, profiles })
   });
   if (!response.ok) {
-    throw new Error('Falha na API (' + response.status + '): ' + await response.text());
+    let errorMsg = await response.text();
+    try {
+      const p = JSON.parse(errorMsg);
+      if (p.error) errorMsg = p.error;
+    } catch(e){}
+    throw new Error('Falha na API (' + response.status + '): ' + errorMsg);
   }
   return await response.json();
 }
@@ -38,7 +43,12 @@ export async function extractAndCategorizeActivities(text: string): Promise<Extr
     body: JSON.stringify({ text })
   });
   if (!response.ok) {
-    return [];
+    let errorMsg = await response.text();
+    try {
+      const p = JSON.parse(errorMsg);
+      if (p.error) errorMsg = p.error;
+    } catch(e) {}
+    throw new Error(errorMsg || 'Erro ao comunicar com a IA');
   }
   return await response.json();
 }
@@ -56,13 +66,14 @@ export async function generateRoomSummary(room: string,
     body: JSON.stringify({ room, lastReport, roomActivities, childrenNames, temporaryMedications, legacyReportsInfo })
   });
   if (!response.ok) {
-    throw new Error('Falha na API (' + response.status + '): ' + await response.text());
+    let errorMsg = await response.text();
+    try {
+      const p = JSON.parse(errorMsg);
+      if (p.error) errorMsg = p.error;
+    } catch(e){}
+    throw new Error('Falha na API (' + response.status + '): ' + errorMsg);
   }
-  const textContent = await response.text();
-  if (textContent.includes("<!DOCTYPE html>") || textContent.includes("<html")) {
-      throw new Error("HTML recebido. O app parece estar rodando em front-end estático sem servidor backend (como no Netlify).");
-  }
-  return textContent;
+  return await response.text();
 }
 
 export async function extractMedicalReportData(images: { base64: string; mimeType: string }[]): Promise<MedicalReportExtraction> {
@@ -72,33 +83,46 @@ export async function extractMedicalReportData(images: { base64: string; mimeTyp
     body: JSON.stringify({ images })
   });
   if (!response.ok) {
-    throw new Error('Falha na API (' + response.status + '): ' + await response.text());
+    let errorMsg = await response.text();
+    try {
+      const p = JSON.parse(errorMsg);
+      if (p.error) errorMsg = p.error;
+    } catch(e){}
+    throw new Error('Falha na API (' + response.status + '): ' + errorMsg);
   }
   return await response.json();
 }
 
-export async function analyzeLegacyReport(data: { date: string; content: string; imageUrl?: string; mimeType?: string }): Promise<string> {
+export async function analyzeLegacyReportAPI(parts: any[]): Promise<string> {
   const response = await fetch('/api/gemini/analyzeLegacyReport', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
+    body: JSON.stringify({ parts })
   });
   if (!response.ok) {
-    throw new Error('Falha na API (' + response.status + '): ' + await response.text());
+    let errorMsg = await response.text();
+    try {
+      const p = JSON.parse(errorMsg);
+      if (p.error) errorMsg = p.error;
+    } catch(e){}
+    throw new Error('Falha na API (' + response.status + '): ' + errorMsg);
   }
-  const result = await response.json();
-  return result.text;
+  return await response.text();
 }
 
-export async function askAI(data: { query: string; context: any }): Promise<string> {
-  const response = await fetch('/api/gemini/askAI', {
+export async function aiSearchAPI(prompt: string): Promise<string> {
+  const response = await fetch('/api/gemini/aiSearch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
+    body: JSON.stringify({ prompt })
   });
   if (!response.ok) {
-    throw new Error('Falha na API (' + response.status + '): ' + await response.text());
+    let errorMsg = await response.text();
+    try {
+      const p = JSON.parse(errorMsg);
+      if (p.error) errorMsg = p.error;
+    } catch(e){}
+    throw new Error('Falha na API (' + response.status + '): ' + errorMsg);
   }
-  const result = await response.json();
-  return result.text;
+  return await response.text();
 }

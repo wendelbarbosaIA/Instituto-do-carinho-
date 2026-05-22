@@ -46,10 +46,10 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { ChildActivity, ReportSummary, ChildProfile, AppNotification, ShiftReport, ChildShiftData, VitalSignReading, LegacyReport, TemporaryMedication } from './types';
-import { extractMedicalEventData, extractMedicalReportData, MedicalReportExtraction, extractAndCategorizeActivities, generateRoomSummary, analyzeLegacyReport as analyzeLegacyReportAPI, askAI as askAIAPI } from './services/geminiService';
+import { extractMedicalEventData, extractMedicalReportData, MedicalReportExtraction, extractAndCategorizeActivities, analyzeLegacyReportAPI, aiSearchAPI } from './services/geminiService';
 import { db, auth } from './firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, serverTimestamp, updateDoc, addDoc, getDoc } from 'firebase/firestore';
-import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, browserPopupRedirectResolver } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged } from 'firebase/auth';
 import Markdown from 'react-markdown';
 
 // Constants
@@ -163,6 +163,13 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     operationType,
     path
   }
+  // Do not crash the app for Quota Limit Exceeded errors
+  if (errInfo.error.includes("Quota limit exceeded") || errInfo.error.includes("Quota exceeded")) {
+    console.warn("Firestore Quota Exceeded for path:", path);
+    // Suppress further crashing or loud error logs for quota issues
+    return;
+  }
+  
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
@@ -189,10 +196,6 @@ export default function App() {
   const [enteredPassword, setEnteredPassword] = useState('');
   const [passwordError, setPasswordError] = useState(false);
   const [toast, setToast] = useState<{ message: string; show: boolean }>({ message: '', show: false });
-  const showToast = (message: string) => {
-    setToast({ message, show: true });
-    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
-  };
   const [medicationNotificationsEnabled, setMedicationNotificationsEnabled] = useState(false);
   const [isSyncingNotifications, setIsSyncingNotifications] = useState(true);
 
@@ -236,19 +239,7 @@ export default function App() {
     else if (latest <= 30 && compact) setCompact(false);
   });
 
-  const [loginError, setLoginError] = useState<string | null>(null);
-  
   useEffect(() => {
-    // Check for redirect result in case of mobile login flow
-    getRedirectResult(auth, browserPopupRedirectResolver).catch((error) => {
-      console.error("Redirect login error:", error);
-      if (error.message && error.message.includes('initial state')) {
-        setLoginError("Erro de particionamento de armazenamento (Cookies de terceiros bloqueados). Tente usar o Safari/Chrome normal, não o navegador de dentro do Instagram/Facebook, ou libere cookies de terceiros nas configurações.");
-      } else {
-        setLoginError(error.message);
-      }
-    });
-
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setIsAuthReady(true);
@@ -271,121 +262,6 @@ export default function App() {
     } else {
       setInternedChildId('');
     }
-    
-    // Check if we should show the important info modal with info from the PREVIOUS shift report
-    if (room !== ADMIN_ROOM) {
-      // Find the most recent shift report for this room in the already synced state
-      const lastReport = shiftReports.find(r => r.room === room);
-      
-      const lastDismissedId = localStorage.getItem('lastDismissedImportantInfoId');
-      
-      const nowForSummary = new Date();
-      const summaryShiftDate = new Date(nowForSummary);
-      // Change shift at 07:05 AM
-      if (summaryShiftDate.getHours() < 7 || (summaryShiftDate.getHours() === 7 && summaryShiftDate.getMinutes() < 5)) {
-        summaryShiftDate.setDate(summaryShiftDate.getDate() - 1);
-      }
-      const shiftDateStr = getLocalDateString(summaryShiftDate);
-      const currentCacheId = `${room}-${overrideChildId || 'none'}-summary-${shiftDateStr}`;
-      
-      if (lastDismissedId !== currentCacheId) {
-        setIsImportantInfoModalOpen(true);
-        setIsGeneratingSummary(true);
-        setImportantInfoId(currentCacheId);
-        
-        try {
-          // Check if summary is already cached
-          const cachedDocRef = doc(db, 'roomSummaries', currentCacheId);
-          const cachedDoc = await getDoc(cachedDocRef);
-          
-          let isAnotherGenerating = false;
-          if (cachedDoc.exists()) {
-            const data = cachedDoc.data();
-            if (data.content) {
-              setImportantInfoContent(data.content);
-              setIsGeneratingSummary(false);
-              return; // We are done!
-            } else if (data.status === 'generating') {
-              const createdAt = data.createdAt ? (typeof data.createdAt.toMillis === 'function' ? data.createdAt.toMillis() : Date.now()) : Date.now();
-              // If it started generating less than 45 seconds ago, we wait for it
-              if (Date.now() - createdAt < 45000) {
-                isAnotherGenerating = true;
-              }
-            }
-          }
-          
-          if (isAnotherGenerating) {
-            setImportantInfoContent("Aguardando IA processar o resumo (outro assistente iniciou a tarefa)...");
-            const unsub = onSnapshot(cachedDocRef, (snap) => {
-              if (snap.exists() && snap.data().content) {
-                setImportantInfoContent(snap.data().content);
-                setIsGeneratingSummary(false);
-                unsub();
-              }
-            });
-            setTimeout(() => { unsub(); setIsGeneratingSummary(false); }, 20000); // 20s timeout
-            return;
-          }
-
-          // We claim the generation
-          await setDoc(cachedDocRef, {
-            status: 'generating',
-            createdAt: serverTimestamp()
-          });
-
-          const roomProfiles = profiles.filter(p => overrideChildId ? p.id === overrideChildId : p.room === room);
-          const childrenNames = roomProfiles.map(p => p.name);
-          
-          // Gather activities from the last 36 hours to ensure full context of the previous shift
-          const cutoffTime = new Date(nowForSummary.getTime() - 36 * 60 * 60 * 1000);
-          
-          const roomActivities = activities.filter(a => childrenNames.includes(a.childName) && new Date(a.timestamp) >= cutoffTime).map(a => ({
-            childName: a.childName,
-            timestamp: new Date(a.timestamp),
-            description: a.description
-          }));
-          
-          const roomTemporaryMedications = roomProfiles
-            .filter(p => Array.isArray(p.temporaryMedications) && p.temporaryMedications.length > 0)
-            .map(p => ({
-              childName: p.name,
-              medications: p.temporaryMedications!
-            }));
-
-          const recentLegacyReports = legacyReports
-            .filter(lr => lr.aiAnalysis)
-            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-            .slice(0, 3)
-            .map(lr => `Data: ${new Date(lr.date).toLocaleDateString('pt-BR')}\nAnálise:\n${lr.aiAnalysis}`);
-
-          const summary = await generateRoomSummary(room, lastReport, roomActivities, childrenNames, roomTemporaryMedications, recentLegacyReports);
-          setImportantInfoContent(summary);
-          
-          // Save to cache
-          try {
-            await setDoc(cachedDocRef, {
-              content: summary,
-              status: 'ready',
-              createdAt: serverTimestamp()
-            });
-          } catch (e) {
-            console.error("Firestore error saving summary:", e);
-          }
-        } catch (error: any) {
-          console.error("Erro ao gerar resumo da enfermaria:", error);
-          if (error.message?.includes('HTML') || error.message?.includes('Fail to fetch') || window.location.hostname.includes('netlify.app')) {
-            setImportantInfoContent("Erro de Servidor: O aplicativo está hospedado no Netlify, que hospeda apenas a interface gráfica. Como a IA exige um servidor (backend) para guardar as senhas com segurança, gerar os resumos e analisar textos não funcionará aqui no Netlify. Por favor, acesse o link de Preview do AI Studio, ou hospede a versão full-stack em outro serviço (ex: Render, GCP, Firebase Functions).");
-          } else {
-            setImportantInfoContent("Não foi possível gerar um resumo usando Inteligência Artificial no momento. Por favor, cheque os relatórios do plantão anterior manualmente.");
-          }
-          // Remove the lock so someone else can try later
-          const cachedDocRef = doc(db, 'roomSummaries', currentCacheId);
-          setDoc(cachedDocRef, { status: 'error' }).catch(() => {});
-        } finally {
-          setIsGeneratingSummary(false);
-        }
-      }
-    }
   };
 
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -393,17 +269,12 @@ export default function App() {
   const handleLogin = async () => {
     if (isLoggingIn) return;
     setIsLoggingIn(true);
-    setLoginError(null);
     const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({
-      prompt: 'select_account'
-    });
     try {
-      await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+      await signInWithPopup(auth, provider);
     } catch (error: any) {
-      if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
+      if (error.code !== 'auth/cancelled-popup-request') {
         console.error("Error logging in:", error);
-        setLoginError(error.message + " (Tente liberar cookies de terceiros ou usar outro navegador se estiver no Safari/Instagram)");
       }
     } finally {
       setIsLoggingIn(false);
@@ -412,6 +283,7 @@ export default function App() {
 
   const [activities, setActivities] = useState<ChildActivity[]>([]);
   const [profiles, setProfiles] = useState<ChildProfile[]>([]);
+  const [isLoadingProfiles, setIsLoadingProfiles] = useState(true);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [shiftReports, setShiftReports] = useState<ShiftReport[]>([]);
   const [vitalSigns, setVitalSigns] = useState<VitalSignReading[]>([]);
@@ -754,7 +626,9 @@ export default function App() {
     const unsubscribeProfiles = onSnapshot(profilesQuery, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChildProfile));
       setProfiles(data);
+      setIsLoadingProfiles(false);
     }, (error) => {
+      setIsLoadingProfiles(false);
       handleFirestoreError(error, OperationType.LIST, 'profiles');
     });
 
@@ -1008,10 +882,6 @@ export default function App() {
 
   // Medical Report AI State
   const [isReportAIModalOpen, setIsReportAIModalOpen] = useState(false);
-  const [isImportantInfoModalOpen, setIsImportantInfoModalOpen] = useState(false);
-  const [importantInfoContent, setImportantInfoContent] = useState('');
-  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
-  const [importantInfoId, setImportantInfoId] = useState('');
   const [isVitalSignsModalOpen, setIsVitalSignsModalOpen] = useState(false);
   const [vitalSignsForm, setVitalSignsForm] = useState({
     childId: '',
@@ -1210,7 +1080,7 @@ export default function App() {
 
   const handleSaveRawEvent = async () => {
     if (!inputText.trim() || !selectedChildForEvent) {
-      showToast("Por favor, selecione uma criança e digite o evento.");
+      alert("Por favor, selecione uma criança e digite o evento.");
       return;
     }
 
@@ -1252,6 +1122,19 @@ export default function App() {
         const newActivities = extractedActivities.map(ea => {
           let activityTimestamp = now.toISOString();
 
+          if (ea.time) {
+            const timeParts = ea.time.split(':');
+            if (timeParts.length === 2) {
+              const hours = parseInt(timeParts[0], 10);
+              const minutes = parseInt(timeParts[1], 10);
+              if (!isNaN(hours) && !isNaN(minutes)) {
+                const calculatedDate = new Date(now);
+                calculatedDate.setHours(hours, minutes, 0, 0);
+                activityTimestamp = calculatedDate.toISOString();
+              }
+            }
+          }
+
           return {
             id: Math.random().toString(36).substr(2, 9),
             childName: childProfile.name,
@@ -1280,10 +1163,10 @@ export default function App() {
 
       setInputText('');
       setSelectedChildForEvent('');
-      showToast("Adicionado ao relatório com sucesso!");
-    } catch (error) {
+      alert("Adicionado ao relatório com sucesso!");
+    } catch (error: any) {
       console.error("Erro ao processar relato:", error);
-      showToast("Houve um erro ao processar seu relato com IA. Tente novamente.");
+      alert(error.message || "Houve um erro ao processar seu relato com IA. Tente novamente.");
     } finally {
       setIsProcessing(false);
     }
@@ -1417,7 +1300,7 @@ export default function App() {
 
   const handleSaveProfile = async () => {
     if (!profileForm.name) {
-      showToast('Por favor, preencha o nome da criança.');
+      alert('Por favor, preencha o nome da criança.');
       return;
     }
 
@@ -1475,7 +1358,7 @@ export default function App() {
       });
     } catch (error) {
       console.error("Error saving profile:", error);
-      showToast("Erro ao salvar o perfil. Tente novamente.");
+      alert("Erro ao salvar o perfil. Tente novamente.");
     } finally {
       setIsProcessing(false);
     }
@@ -1524,14 +1407,35 @@ export default function App() {
     const routine = sorted.filter(act => act.type !== 'glycemia');
     const glycemia = sorted.filter(act => act.type === 'glycemia');
 
+    const normalizeCategory = (c?: string) => {
+      if (!c) return '';
+      return c.toLowerCase()
+        .replace(/[áàâã]/g, 'a')
+        .replace(/[éèê]/g, 'e')
+        .replace(/[íìî]/g, 'i')
+        .replace(/[óòôõ]/g, 'o')
+        .replace(/[úùû]/g, 'u')
+        .replace(/[ç]/g, 'c');
+    };
+
     // Grouping routine activities by category
     const categorized = {
-      alimentacao: routine.filter(a => a.category === 'alimentacao'),
-      intercorrencia: routine.filter(a => a.category === 'intercorrencia'),
-      sos: routine.filter(a => a.category === 'sos'),
-      medicacao_rotina: routine.filter(a => a.category === 'medicacao_rotina'),
-      cuidados_extras: routine.filter(a => a.category === 'cuidados_extras'),
-      rotina: routine.filter(a => a.category === 'rotina' || (!a.category && a.type !== 'medication'))
+      alimentacao: routine.filter(a => normalizeCategory(a.category) === 'alimentacao'),
+      intercorrencia: routine.filter(a => normalizeCategory(a.category) === 'intercorrencia'),
+      sos: routine.filter(a => normalizeCategory(a.category) === 'sos'),
+      medicacao_rotina: routine.filter(a => normalizeCategory(a.category) === 'medicacao_rotina'),
+      cuidados_extras: routine.filter(a => normalizeCategory(a.category) === 'cuidados_extras'),
+      rotina: routine.filter(a => {
+        const cat = normalizeCategory(a.category);
+        if (cat === 'rotina') return true;
+        if (!a.category && a.type !== 'medication') return true;
+        
+        // If it got some weird category string not falling into the main ones, dump it into rotina
+        if (a.category && !['alimentacao', 'intercorrencia', 'sos', 'medicacao_rotina', 'cuidados_extras'].includes(cat)) {
+          return true;
+        }
+        return false;
+      })
     };
 
     // Fallback manual meds se tiverem vindo do front-end apenas como type="medication" e não tiver category ainda:
@@ -1550,14 +1454,19 @@ export default function App() {
     const formatSection = (title: string, list: any[], showTime = true) => {
       if (list.length === 0) return '';
       const items = list.map(act => {
-        if (!showTime) return act.description;
+        const desc = act.description.trim();
+        if (!showTime) return desc;
         const time = new Date(act.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
         
         if (seenTimestamps.has(act.timestamp)) {
-          return act.description;
+          return desc;
         } else {
           seenTimestamps.add(act.timestamp);
-          return `[${time}] ${act.description}`;
+          // Se a descrição já inicia com o formato de hora [XXh] ou [XXhYY] ou [XX:XX], não duplicamos
+          if (desc.startsWith('[')) {
+            return desc;
+          }
+          return `[${time}] ${desc}`;
         }
       }).join('\n');
       return `\n${title}:\n${items}\n`;
@@ -1938,7 +1847,7 @@ export default function App() {
       });
     } catch (error) {
       console.error("Error saving shift report:", error);
-      showToast("Erro ao salvar o relatório. Tente novamente.");
+      alert("Erro ao salvar o relatório. Tente novamente.");
     } finally {
       setIsProcessing(false);
     }
@@ -1997,7 +1906,7 @@ export default function App() {
       setPrescriptionMimeType(mimeType);
     } catch (error) {
       console.error("Erro ao processar imagem:", error);
-      showToast("Erro ao processar a imagem. Tente novamente.");
+      alert("Erro ao processar a imagem. Tente novamente.");
     } finally {
       setIsPrescriptionProcessing(false);
     }
@@ -2019,7 +1928,7 @@ export default function App() {
       }));
     } catch (error) {
       console.error("Erro ao processar imagem para relatório legado:", error);
-      showToast("Erro ao processar a imagem.");
+      alert("Erro ao processar a imagem.");
     } finally {
       setIsAnalyzingLegacyReport(false);
     }
@@ -2027,23 +1936,47 @@ export default function App() {
 
   const analyzeLegacyReport = async () => {
     if (!legacyReportForm.content && !legacyReportForm.imageUrl) {
-      showToast("Por favor, adicione texto ou uma imagem para analisar.");
+      alert("Por favor, adicione texto ou uma imagem para analisar.");
       return;
     }
 
     setIsAnalyzingLegacyReport(true);
     setLegacyReportAnalysis(null);
     try {
-      const text = await analyzeLegacyReportAPI({
-        date: legacyReportForm.date,
-        content: legacyReportForm.content,
-        imageUrl: legacyReportForm.imageUrl || undefined,
-        mimeType: legacyReportForm.mimeType
-      });
-      setLegacyReportAnalysis(text);
+      const prompt = `Você é um assistente de enfermagem especializado em cuidados de crianças especiais. 
+      Analise este relatório de plantão (texto ou imagem) da enfermaria e extraia informações críticas de forma estruturada.
+      
+      FOQUE EM:
+      - Ocorrências principais no plantão
+      - Sinais vitais anormais ou alertas
+      - Medicamentos administrados (especiais ou SOS)
+      - Alimentação (GTT, SNE, Oral) e intercorrências
+      - Observações comportamentais relevantes das crianças
+      
+      Responda em Português do Brasil com um resumo técnico, estruturado e profissional. 
+      Agrupe as informações por criança (pelo nome), relatando os eventos de cada uma. Se for um evento geral da enfermaria, crie uma seção "Geral".
+      A data do relatório é: ${legacyReportForm.date}`;
+      
+      const parts: any[] = [{ text: prompt }];
+      
+      if (legacyReportForm.content) {
+        parts.push({ text: `CONTEÚDO TEXTUAL DO RELATÓRIO:\n${legacyReportForm.content}` });
+      }
+      
+      if (legacyReportForm.imageUrl) {
+        parts.push({ 
+          inlineData: { 
+            data: legacyReportForm.imageUrl, 
+            mimeType: legacyReportForm.mimeType || 'image/jpeg' 
+          } 
+        });
+      }
+
+      const responseText = await analyzeLegacyReportAPI(parts);
+      setLegacyReportAnalysis(responseText);
     } catch (error) {
       console.error("Erro na análise da IA:", error);
-      showToast("Houve um erro ao se comunicar com a IA. Verifique se o servidor está rodando corretamente.");
+      alert("Houve um erro ao processar o relatório de plantão. Tente novamente.");
     } finally {
       setIsAnalyzingLegacyReport(false);
     }
@@ -2080,10 +2013,10 @@ export default function App() {
       setIsLegacyReportModalOpen(false);
       setLegacyReportForm({ date: new Date().toISOString().split('T')[0], content: '' });
       setLegacyReportAnalysis(null);
-      showToast("Histórico legado importado e analisado com sucesso!");
+      alert("Histórico legado importado e analisado com sucesso!");
     } catch (error) {
       console.error("Erro ao salvar relatório legado:", error);
-      showToast("Erro ao salvar relatório no banco de dados.");
+      alert("Erro ao salvar relatório no banco de dados.");
     } finally {
       setIsAnalyzingLegacyReport(false);
     }
@@ -2139,7 +2072,7 @@ export default function App() {
       setMatchedProfileId(null);
     } catch (error) {
       console.error("Erro ao salvar prescrição:", error);
-      showToast("Erro ao salvar a prescrição. Verifique sua conexão e tente novamente.");
+      alert("Erro ao salvar a prescrição. Verifique sua conexão e tente novamente.");
     } finally {
       setIsPrescriptionProcessing(false);
     }
@@ -2147,7 +2080,7 @@ export default function App() {
 
   const handleSaveVitalSigns = async () => {
     if (!vitalSignsForm.childId) {
-      showToast('Selecione uma criança.');
+      alert('Selecione uma criança.');
       return;
     }
 
@@ -2252,7 +2185,7 @@ export default function App() {
       });
     } catch (error) {
       console.error("Erro ao salvar sinais vitais:", error);
-      showToast("Erro ao salvar os sinais vitais. Tente novamente.");
+      alert("Erro ao salvar os sinais vitais. Tente novamente.");
     } finally {
       setIsProcessing(false);
     }
@@ -2292,7 +2225,7 @@ export default function App() {
       }
     } catch (error) {
       console.error("Erro ao processar relatório:", error);
-      showToast("Erro ao processar as imagens. Tente novamente.");
+      alert("Erro ao processar as imagens. Tente novamente.");
     } finally {
       setIsReportAIProcessing(false);
     }
@@ -2334,7 +2267,7 @@ export default function App() {
       setMatchedReportProfileId(null);
     } catch (error) {
       console.error("Erro ao confirmar relatório:", error);
-      showToast("Erro ao salvar os dados. Tente novamente.");
+      alert("Erro ao salvar os dados. Tente novamente.");
     } finally {
       setIsReportAIProcessing(false);
     }
@@ -2566,7 +2499,7 @@ export default function App() {
     const justification = medicationJustifications[notif.id];
 
     if (isLate && (!justification || justification.trim() === '')) {
-      showToast("Por favor, preencha a justificativa para o atraso.");
+      alert("Por favor, preencha a justificativa para o atraso.");
       return;
     }
 
@@ -2702,14 +2635,29 @@ export default function App() {
         }))
       };
 
-      const aiResponse = await askAIAPI({
-        query: currentQuery,
-        context: context
-      });
+      const prompt = `
+        Você é o Assistente Virtual do Instituto do Carinho.
+        Sua tarefa é responder perguntas dos funcionários usando os dados do banco de dados fornecidos abaixo.
+        
+        Sempre responda em Português do Brasil.
+        
+        DADOS DO BANCO DE DADOS:
+        ${JSON.stringify(context)}
+        
+        PERGUNTA DO USUÁRIO:
+        ${currentQuery}
+        
+        INSTRUÇÕES:
+        - Responda de forma clara, profissional e carinhosa.
+        - Se não encontrar a informação nos dados fornecidos, diga que não encontrou nos registros recentes.
+        - Mantenha o foco em informações sobre as crianças, medicamentos, atividades e relatórios.
+      `;
+
+      const aiResponse = await aiSearchAPI(prompt);
       setSearchMessages(prev => [...prev, { role: 'ai', content: aiResponse }]);
     } catch (error) {
       console.error("AI Search Error:", error);
-      setSearchMessages(prev => [...prev, { role: 'ai', content: "Houve um erro de permissão (403). Verifique se você configurou sua GEMINI_API_KEY corretamente na aba Settings > Secrets do AI Studio." }]);
+      setSearchMessages(prev => [...prev, { role: 'ai', content: "Houve um erro ao processar a pergunta. Tente novamente." }]);
     } finally {
       setIsSearching(false);
     }
@@ -2803,18 +2751,12 @@ export default function App() {
     setCurrentShiftReport({ ...currentShiftReport, childrenData: newChildrenData });
   };
 
-  const copyToClipboard = (text: string, message?: string, openWhatsApp?: boolean) => {
+  const copyToClipboard = (text: string, message?: string) => {
     navigator.clipboard.writeText(text).then(() => {
-      showToast(message || 'Relatório copiado para a área de transferência!');
-      if (openWhatsApp) {
-        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-      }
+      setToast({ message: message || 'Relatório copiado para a área de transferência!', show: true });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
     }).catch(err => {
       console.error('Falha ao copiar:', err);
-      // Fallback: tenta abrir o WhatsApp mesmo se a cópia falhar
-      if (openWhatsApp) {
-        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-      }
     });
   };
 
@@ -3025,7 +2967,7 @@ END:VCALENDAR`;
                       onChange={(e) => setInternedChildId(e.target.value)}
                       className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-sky-200"
                     >
-                      <option value="">{profiles.length === 0 ? 'Carregando crianças...' : 'Selecione uma criança...'}</option>
+                      <option value="">{isLoadingProfiles ? 'Carregando crianças...' : 'Selecione uma criança...'}</option>
                       {profiles.filter(p => p.isActive !== false).sort((a,b) => a.name.localeCompare(b.name)).map(p => (
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
@@ -3045,7 +2987,7 @@ END:VCALENDAR`;
                     <button 
                       onClick={() => {
                         if (!internedChildId) {
-                           showToast('Selecione uma criança primeiro.');
+                           alert('Selecione uma criança primeiro.');
                            return;
                         }
                         handleSelectRoom('Internação Temporária', internedChildId);
@@ -3312,7 +3254,7 @@ END:VCALENDAR`;
                       onChange={(e) => setSelectedChildForEvent(e.target.value)}
                       className="w-full p-3 bg-slate-50 rounded-xl border-none focus:ring-2 focus:ring-sky-200 text-slate-700"
                     >
-                      <option value="" disabled>{profiles.length === 0 ? 'Carregando crianças...' : 'Selecione a criança...'}</option>
+                      <option value="" disabled>{isLoadingProfiles ? 'Carregando crianças...' : 'Selecione a criança...'}</option>
                       {profiles
                         .filter(p => !myActiveRoom || myActiveRoom === ADMIN_ROOM || (myActiveRoom === 'Internação Temporária' ? p.id === internedChildId : p.room === myActiveRoom))
                         .map(p => (
@@ -4328,14 +4270,14 @@ END:VCALENDAR`;
                       }
 
                       if (success) {
-                        copyToClipboard(text, 'Relatório copiado e salvo no histórico!', true);
+                        copyToClipboard(text, 'Relatório copiado e salvo no histórico!');
                       } else {
-                        copyToClipboard(text, 'Relatório copiado, mas houve um erro ao salvá-lo.', true);
+                        copyToClipboard(text, 'Relatório copiado, mas houve um erro ao salvá-lo.');
                       }
                     }}
                     className="flex shrink-0 items-center gap-2 px-6 py-3 bg-emerald-500 text-white rounded-xl text-sm font-bold hover:bg-emerald-600 transition-all shadow-md shadow-emerald-200"
                   >
-                    <ClipboardList className="w-4 h-4" /> Copiar relatório e enviar para whatsapp
+                    <ClipboardList className="w-4 h-4" /> Copiar Relatório
                   </button>
                 </div>
 
@@ -4416,11 +4358,11 @@ END:VCALENDAR`;
                           <button 
                             onClick={() => {
                               const text = formatShiftReportForWhatsApp(report);
-                              copyToClipboard(text, undefined, true);
+                              copyToClipboard(text);
                             }}
                             className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg text-xs font-bold hover:bg-emerald-100 transition-all"
                           >
-                            <ClipboardList className="w-3 h-3" /> Copiar relatório e enviar para whatsapp
+                            <ClipboardList className="w-3 h-3" /> Copiar para WhatsApp
                           </button>
                           {isShiftReportEditable(report) && (
                             <>
@@ -4902,7 +4844,7 @@ END:VCALENDAR`;
                             value={matchedProfileId || ''}
                             onChange={(e) => setMatchedProfileId(e.target.value)}
                           >
-                            <option value="">{profiles.length === 0 ? 'Carregando crianças...' : 'Selecione a criança...'}</option>
+                            <option value="">{isLoadingProfiles ? 'Carregando crianças...' : 'Selecione a criança...'}</option>
                             {profiles
                               .filter(p => !myActiveRoom || myActiveRoom === ADMIN_ROOM || (myActiveRoom === 'Internação Temporária' ? p.id === internedChildId : p.room === myActiveRoom))
                               .map(p => (
@@ -6228,7 +6170,7 @@ END:VCALENDAR`;
                     onChange={(e) => setMedicalEventForm({ ...medicalEventForm, childId: e.target.value })}
                     className="w-full p-4 bg-slate-50 rounded-2xl border-none focus:ring-2 focus:ring-sky-200 text-sm font-medium"
                   >
-                    <option value="">{profiles.length === 0 ? 'Carregando crianças...' : 'Selecione a criança...'}</option>
+                    <option value="">{isLoadingProfiles ? 'Carregando crianças...' : 'Selecione a criança...'}</option>
                     {profiles
                       .filter(p => !myActiveRoom || myActiveRoom === ADMIN_ROOM || (myActiveRoom === 'Internação Temporária' ? p.id === internedChildId : p.room === myActiveRoom))
                       .map(p => (
@@ -6590,11 +6532,11 @@ END:VCALENDAR`;
                 <button 
                   onClick={() => {
                     const text = formatShiftReportForWhatsApp(selectedReport);
-                    copyToClipboard(text, undefined, true);
+                    copyToClipboard(text);
                   }}
                   className="flex-1 bg-emerald-500 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-200"
                 >
-                  <ClipboardList className="w-5 h-5" /> Copiar relatório e enviar para whatsapp
+                  <ClipboardList className="w-5 h-5" /> Copiar para WhatsApp
                 </button>
                 <button 
                   onClick={() => setSelectedReport(null)}
@@ -7229,7 +7171,7 @@ END:VCALENDAR`;
                           onChange={(e) => setVitalSignsForm({ ...vitalSignsForm, childId: e.target.value })}
                           className="w-full p-3 bg-slate-50 rounded-2xl border-none focus:ring-2 focus:ring-rose-200 text-sm font-medium"
                         >
-                          <option value="">{profiles.length === 0 ? 'Carregando crianças...' : 'Selecione a criança...'}</option>
+                          <option value="">{isLoadingProfiles ? 'Carregando crianças...' : 'Selecione a criança...'}</option>
                           {profiles
                             .filter(p => !selectedRoomForVitals || (selectedRoomForVitals === 'Internação Temporária' ? p.id === internedChildId : p.room === selectedRoomForVitals))
                             .map(p => (
@@ -7425,80 +7367,6 @@ END:VCALENDAR`;
           </motion.div>
         )}
       </AnimatePresence>
-
-      <AnimatePresence>
-        {isImportantInfoModalOpen && (importantInfoContent || isGeneratingSummary) && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-              onClick={() => !isGeneratingSummary && setIsImportantInfoModalOpen(false)}
-            />
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl relative z-10 overflow-hidden flex flex-col max-h-[90vh]"
-            >
-              <div className="p-8 text-center space-y-6 overflow-y-auto">
-                <div className={`w-20 h-20 rounded-[2rem] flex items-center justify-center mx-auto ring-8 shrink-0 ${isGeneratingSummary ? 'bg-sky-50 ring-sky-50/50' : 'bg-amber-50 ring-amber-50/50'}`}>
-                  {isGeneratingSummary ? (
-                    <Sparkles className="w-10 h-10 text-sky-500 animate-pulse" />
-                  ) : (
-                    <Sparkles className="w-10 h-10 text-amber-500" />
-                  )}
-                </div>
-                <div className="space-y-2 shrink-0">
-                  <h3 className="text-2xl font-black text-slate-800 uppercase tracking-tighter">
-                    {isGeneratingSummary ? 'Analisando Enfermaria...' : 'Resumo da Enfermaria'}
-                  </h3>
-                  <p className="text-slate-500 font-medium text-sm">
-                    {isGeneratingSummary ? 'Gerando um resumo inteligente com as informações do último plantão, histórico e atividades recentes.' : 'Resumo inteligente gerado por IA'}
-                  </p>
-                </div>
-                
-                <div className={`p-6 rounded-[2rem] text-left shrink-0 transition-all duration-500 ${isGeneratingSummary ? 'bg-slate-50 border border-slate-100 flex items-center justify-center min-h-[150px]' : 'bg-amber-50/50 border border-amber-100/50'}`}>
-                  {isGeneratingSummary ? (
-                    <div className="flex flex-col items-center gap-3">
-                       <Loader2 className="w-6 h-6 text-sky-500 animate-spin" />
-                       <span className="text-sm font-bold text-slate-500 animate-pulse">Lendo históricos...</span>
-                    </div>
-                  ) : (
-                    <div className="text-slate-700 font-medium leading-relaxed text-sm format-markdown prose prose-slate max-w-none prose-p:mb-2 prose-p:last:mb-0 prose-ul:mb-2 prose-ul:last:mb-0 prose-li:my-0.5">
-                      <Markdown>{importantInfoContent}</Markdown>
-                    </div>
-                  )}
-                </div>
-
-                {!isGeneratingSummary && (
-                  <div className="flex items-center justify-center gap-2 group cursor-pointer select-none py-2 shrink-0" 
-                       onClick={() => {
-                         localStorage.setItem('lastDismissedImportantInfoId', importantInfoId);
-                         setIsImportantInfoModalOpen(false);
-                       }}>
-                    <div className="w-5 h-5 rounded-md border-2 border-slate-200 group-hover:border-amber-400 transition-colors flex items-center justify-center bg-white shadow-sm">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-amber-500 scale-0 group-hover:scale-100 transition-transform" />
-                    </div>
-                    <span className="text-xs font-bold text-slate-400 group-hover:text-amber-500 transition-colors uppercase tracking-widest">Não mostrar novamente hoje</span>
-                  </div>
-                )}
-              </div>
-              
-              <div className="p-4 border-t border-slate-100 bg-slate-50/50 shrink-0">
-                <button 
-                  disabled={isGeneratingSummary}
-                  onClick={() => setIsImportantInfoModalOpen(false)}
-                  className="w-full py-4 bg-slate-800 disabled:bg-slate-300 disabled:text-slate-500 text-white font-black uppercase tracking-widest text-xs rounded-2xl hover:bg-slate-900 transition-all active:scale-95 shadow-lg shadow-slate-200"
-                >
-                  Entendi, Prosseguir
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </>
   ) : (
         <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 font-sans text-center">
@@ -7508,13 +7376,6 @@ END:VCALENDAR`;
               <h2 className="text-2xl font-bold text-slate-800 tracking-tighter">Bem-vindo ao Portal</h2>
               <p className="text-slate-500 text-sm">Faça login para acessar o sistema do Instituto do Carinho.</p>
             </div>
-            
-            {loginError && (
-              <div className="p-4 bg-rose-50 text-rose-600 rounded-xl text-sm font-medium text-center">
-                {loginError}
-              </div>
-            )}
-
             <button 
               onClick={handleLogin}
               disabled={isLoggingIn}

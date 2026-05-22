@@ -1,6 +1,5 @@
 {
   "name": "Instituto do Carinho",
   "description": "Organização de relatórios, medicamentos e atividades para institutos infantis.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "requestFramePermissions": []
 }
